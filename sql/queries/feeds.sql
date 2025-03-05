@@ -46,13 +46,8 @@ FROM feed_follows
 INNER JOIN users ON users.id = feed_follows.user_id
 INNER JOIN feeds ON feeds.id = feed_follows.feed_id
 WHERE users.name = $1;
-/*
--- name: GetUser :one
-SELECT * FROM users WHERE name = $1;
 
--- name: DropAllUsers :exec
-DELETE FROM users;
-
--- name: GetUsers :many
-SELECT * FROM users;
-*/
+-- name: Unfollow :exec
+DELETE FROM feed_follows
+WHERE user_id = (SELECT id FROM users WHERE users.name = $1)
+AND feed_id = (SELECT id FROM feeds WHERE feeds.url = $2);

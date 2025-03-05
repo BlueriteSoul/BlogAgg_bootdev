@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/BlueriteSoul/BlogAgg_bootdev/internal/database"
@@ -76,24 +77,28 @@ func handlerUsers(s *state, cmd command) error {
 	return nil
 }
 func handlerAgg(s *state, cmd command) error {
-	rssAgg, err := fetchFeed(context.Background(), "https://www.wagslane.dev/index.xml")
-	if err != nil {
-		return fmt.Errorf("unexpected status code: %w", err)
+	if len(cmd.Args) != 1 {
+		return fmt.Errorf("usage: %s <time-between-res> e.g. 1s/1m/1h", cmd.Name)
 	}
-	fmt.Println(rssAgg)
+	timeBetweenReqs, err := time.ParseDuration(cmd.Args[0])
+	if err != nil {
+		return fmt.Errorf("couldn't parse time: %w", err)
+	}
+	fmt.Printf("Collecting feeds every %v\n", timeBetweenReqs)
+	ticker := time.NewTicker(timeBetweenReqs)
+	for ; ; <-ticker.C {
+		scrapeFeeds(s)
+	}
 	return nil
 }
 
-func handlerAddFeed(s *state, cmd command) error {
+func handlerAddFeed(s *state, cmd command, user database.User) error {
 	if len(cmd.Args) < 2 {
-		return fmt.Errorf("Not enough args")
+		return fmt.Errorf("usage: %s <name> <url>", cmd.Name)
 	}
 	name := cmd.Args[0]
 	URL := cmd.Args[1]
-	user, err := s.db.GetUser(context.Background(), s.cfg.CurrentUserName)
-	if err != nil {
-		return fmt.Errorf("couln't get user_id, error: %w", err)
-	}
+
 	newFeed := database.AddFeedParams{ID: uuid.New(), CreatedAt: time.Now(), UpdatedAt: time.Now(), Name: name, Url: URL, UserID: user.ID}
 	dbFeedReturned, err := s.db.AddFeed(context.Background(), newFeed)
 	if err != nil {
@@ -117,19 +122,15 @@ func handlerFeeds(s *state, cmd command) error {
 	return nil
 }
 
-func handlerFollow(s *state, cmd command) error {
+func handlerFollow(s *state, cmd command, user database.User) error {
 	if len(cmd.Args) != 1 {
 		return fmt.Errorf("usage: %s <url>", cmd.Name)
-	}
-	usr, err := s.db.GetUser(context.Background(), s.cfg.CurrentUserName)
-	if err != nil {
-		return fmt.Errorf("Couldn't query a user, %w", err)
 	}
 	feed, err := s.db.GetFeedByURL(context.Background(), cmd.Args[0])
 	if err != nil {
 		return fmt.Errorf("Couldn't query a feed, %w", err)
 	}
-	newFeedToFollow := database.CreateFeedFollowParams{ID: uuid.New(), CreatedAt: time.Now(), UpdatedAt: time.Now(), UserID: usr.ID, FeedID: feed.ID}
+	newFeedToFollow := database.CreateFeedFollowParams{ID: uuid.New(), CreatedAt: time.Now(), UpdatedAt: time.Now(), UserID: user.ID, FeedID: feed.ID}
 	followedFeed, err := s.db.CreateFeedFollow(context.Background(), newFeedToFollow)
 	if err != nil {
 		return fmt.Errorf("couldn't follow a feed, error: %w", err)
@@ -138,12 +139,47 @@ func handlerFollow(s *state, cmd command) error {
 	return nil
 }
 
-func handlerFollowing(s *state, cmd command) error {
-	followedFeeds, err := s.db.GetFeedFollowsForUser(context.Background(), s.cfg.CurrentUserName)
+func handlerFollowing(s *state, cmd command, user database.User) error {
+	followedFeeds, err := s.db.GetFeedFollowsForUser(context.Background(), user.Name)
 	if err != nil {
 		return fmt.Errorf("Couldn't query a user, %w", err)
 	}
+	fmt.Printf("%+v\n", followedFeeds)
+	for _, fF := range followedFeeds {
+		fmt.Println(fF.FeedName)
+	}
+	return nil
+}
 
-	fmt.Println(followedFeeds)
+func handlerUnfollow(s *state, cmd command, user database.User) error {
+	toUnfollow := database.UnfollowParams{user.Name, cmd.Args[0]}
+	err := s.db.Unfollow(context.Background(), toUnfollow)
+	if err != nil {
+		return fmt.Errorf("Couldn't unfollow, %w", err)
+	}
+
+	fmt.Println("Unfollowed")
+	return nil
+}
+
+func handlerBrowse(s *state, cmd command, user database.User) error {
+	var limit int32
+	if len(cmd.Args) == 0 {
+		limit = 2
+	} else {
+		temp, err := strconv.Atoi(cmd.Args[0])
+		if err != nil {
+			return fmt.Errorf("argument must be an integer, %w", err)
+		}
+		limit = int32(temp)
+	}
+	posts, err := s.db.GetPostsForUser(context.Background(), database.GetPostsForUserParams{Name: user.Name, Limit: limit})
+	if err != nil {
+		return fmt.Errorf("Couldn't get posts, %w", err)
+	}
+	for _, post := range posts {
+		fmt.Println(post.Title)
+		fmt.Println(post.Description)
+	}
 	return nil
 }

@@ -22,7 +22,7 @@ VALUES (
     $5,
     $6
 )
-RETURNING id, created_at, updated_at, name, url, user_id
+RETURNING id, created_at, updated_at, name, url, user_id, last_fetched_at
 `
 
 type AddFeedParams struct {
@@ -51,6 +51,7 @@ func (q *Queries) AddFeed(ctx context.Context, arg AddFeedParams) (Feed, error) 
 		&i.Name,
 		&i.Url,
 		&i.UserID,
+		&i.LastFetchedAt,
 	)
 	return i, err
 }
@@ -116,7 +117,7 @@ func (q *Queries) CreateFeedFollow(ctx context.Context, arg CreateFeedFollowPara
 }
 
 const getFeedByURL = `-- name: GetFeedByURL :one
-SELECT id, created_at, updated_at, name, url, user_id FROM feeds 
+SELECT id, created_at, updated_at, name, url, user_id, last_fetched_at FROM feeds 
 WHERE url = $1
 `
 
@@ -130,6 +131,7 @@ func (q *Queries) GetFeedByURL(ctx context.Context, url string) (Feed, error) {
 		&i.Name,
 		&i.Url,
 		&i.UserID,
+		&i.LastFetchedAt,
 	)
 	return i, err
 }
@@ -204,4 +206,20 @@ func (q *Queries) GetFeeds(ctx context.Context) ([]GetFeedsRow, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const unfollow = `-- name: Unfollow :exec
+DELETE FROM feed_follows
+WHERE user_id = (SELECT id FROM users WHERE users.name = $1)
+AND feed_id = (SELECT id FROM feeds WHERE feeds.url = $2)
+`
+
+type UnfollowParams struct {
+	Name string
+	Url  string
+}
+
+func (q *Queries) Unfollow(ctx context.Context, arg UnfollowParams) error {
+	_, err := q.db.ExecContext(ctx, unfollow, arg.Name, arg.Url)
+	return err
 }
